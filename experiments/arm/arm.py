@@ -1,4 +1,3 @@
-
 import os
 import csv
 import time
@@ -17,14 +16,14 @@ from ribs.emitters import (GaussianEmitter, ImprovementEmitter, IsoLineEmitter,
 from ribs.optimizers import Optimizer
 from ribs.visualize import grid_archive_heatmap
 
+
 def evaluate_grasp(joint_angles, link_lengths, calc_jacobians=True):
-    
     n_dim = link_lengths.shape[0]
     objs = -np.var(joint_angles, axis=1)
 
     # Remap the objective from [-1, 0] to [0, 100]
-    objs = (objs+1.0)*100.0
-    
+    objs = (objs + 1.0) * 100.0
+
     # theta_1, theta_1 + theta_2, ...
     cum_theta = np.cumsum(joint_angles, axis=1)
     # l_1 * cos(theta_1), l_2 * cos(theta_1 + theta_2), ...
@@ -39,25 +38,25 @@ def evaluate_grasp(joint_angles, link_lengths, calc_jacobians=True):
         ),
         axis=1,
     )
-    
+
     obj_derivatives = None
     measure_derivatives = None
     if calc_jacobians:
-    
+
         means = np.mean(joint_angles, axis=1)
         means = np.expand_dims(means, axis=1)
-    
+
         base = n_dim * np.ones(n_dim)
         obj_derivatives = -2 * (joint_angles - means) / base
-    
-        sum_0 = np.zeros(len(joint_angles)) 
-        sum_1 = np.zeros(len(joint_angles)) 
+
+        sum_0 = np.zeros(len(joint_angles))
+        sum_1 = np.zeros(len(joint_angles))
 
         measure_derivatives = np.zeros((len(joint_angles), 2, n_dim))
-        for i in range(n_dim-1, -1, -1):
+        for i in range(n_dim - 1, -1, -1):
             sum_0 += -link_lengths[i] * np.sin(cum_theta[:, i])
             sum_1 += link_lengths[i] * np.cos(cum_theta[:, i])
-            
+
             measure_derivatives[:, 0, i] = sum_0
             measure_derivatives[:, 1, i] = sum_1
 
@@ -85,15 +84,14 @@ def create_optimizer(algorithm, dim, link_lengths, seed):
 
     # Create archive.
     if algorithm in [
-            "map_elites", "map_elites_line", "cma_me_imp",
-            "og_map_elites", "og_map_elites_line",
-            "og_map_elites_ind", "og_map_elites_line_ind",
-            "omg_mega", "cma_mega", "cma_mega_adam",
+        "map_elites", "map_elites_line", "cma_me_imp",
+        "og_map_elites", "og_map_elites_line",
+        "og_map_elites_ind", "og_map_elites_line_ind",
+        "omg_mega", "cma_mega", "cma_mega_adam",
     ]:
         archive = GridArchive((100, 100), bounds, seed=seed)
     else:
         raise ValueError(f"Algorithm `{algorithm}` is not recognized")
-
 
     # Create emitters. Each emitter needs a different seed, so that they do not
     # all do the same thing.
@@ -130,22 +128,22 @@ def create_optimizer(algorithm, dim, link_lengths, seed):
         ]
     elif algorithm in ["og_map_elites_ind"]:
         emitters = [
-            GradientEmitter(archive,
-                            initial_sol,
-                            sigma0=0.0,
-                            sigma_g=100.0,
-                            measure_gradients=False,
-                            normalize_gradients=False,
-                            bounds=None,
-                            batch_size=batch_size // 3,
-                            seed=emitter_seeds[0])
-        ] + [
-            GaussianEmitter(archive,
-                            initial_sol,
-                            0.1,
-                            batch_size=batch_size // 3,
-                            seed=emitter_seeds[1])
-        ]
+                       GradientEmitter(archive,
+                                       initial_sol,
+                                       sigma0=0.0,
+                                       sigma_g=100.0,
+                                       measure_gradients=False,
+                                       normalize_gradients=False,
+                                       bounds=None,
+                                       batch_size=batch_size // 3,
+                                       seed=emitter_seeds[0])
+                   ] + [
+                       GaussianEmitter(archive,
+                                       initial_sol,
+                                       0.1,
+                                       batch_size=batch_size // 3,
+                                       seed=emitter_seeds[1])
+                   ]
     elif algorithm in ["og_map_elites_line"]:
         emitters = [
             GradientEmitter(archive,
@@ -162,23 +160,23 @@ def create_optimizer(algorithm, dim, link_lengths, seed):
         ]
     elif algorithm in ["og_map_elites_line_ind"]:
         emitters = [
-            GradientEmitter(archive,
-                            initial_sol,
-                            sigma0=0.0,
-                            sigma_g=100.0,
-                            measure_gradients=False,
-                            normalize_gradients=False,
-                            bounds=None,
-                            batch_size=batch_size // 3,
-                            seed=emitter_seeds[0])
-        ] + [
-            IsoLineEmitter(archive,
-                           initial_sol,
-                           iso_sigma=0.1,
-                           line_sigma=0.2,
-                           batch_size=batch_size // 3,
-                           seed=emitter_seeds[1])
-        ]
+                       GradientEmitter(archive,
+                                       initial_sol,
+                                       sigma0=0.0,
+                                       sigma_g=100.0,
+                                       measure_gradients=False,
+                                       normalize_gradients=False,
+                                       bounds=None,
+                                       batch_size=batch_size // 3,
+                                       seed=emitter_seeds[0])
+                   ] + [
+                       IsoLineEmitter(archive,
+                                      initial_sol,
+                                      iso_sigma=0.1,
+                                      line_sigma=0.2,
+                                      batch_size=batch_size // 3,
+                                      seed=emitter_seeds[1])
+                   ]
     elif algorithm in ["omg_mega"]:
         emitters = [
             GradientEmitter(archive,
@@ -194,28 +192,28 @@ def create_optimizer(algorithm, dim, link_lengths, seed):
     elif algorithm in ["cma_mega"]:
         emitters = [
             GradientImprovementEmitter(archive,
-                            initial_sol,
-                            sigma_g=0.05,
-                            stepsize=1.0,
-                            gradient_optimizer="gradient_ascent",
-                            normalize_gradients=True,
-                            selection_rule="mu",
-                            bounds=None,
-                            batch_size=batch_size - 1,
-                            seed=s) for s in emitter_seeds
+                                       initial_sol,
+                                       sigma_g=0.05,
+                                       stepsize=1.0,
+                                       gradient_optimizer="gradient_ascent",
+                                       normalize_gradients=True,
+                                       selection_rule="mu",
+                                       bounds=None,
+                                       batch_size=batch_size - 1,
+                                       seed=s) for s in emitter_seeds
         ]
     elif algorithm in ["cma_mega_adam"]:
         emitters = [
             GradientImprovementEmitter(archive,
-                            initial_sol,
-                            sigma_g=0.05,
-                            stepsize=0.002, 
-                            gradient_optimizer="adam",
-                            normalize_gradients=True,
-                            selection_rule="mu",
-                            bounds=None,
-                            batch_size=batch_size - 1,
-                            seed=s) for s in emitter_seeds
+                                       initial_sol,
+                                       sigma_g=0.05,
+                                       stepsize=0.002,
+                                       gradient_optimizer="adam",
+                                       normalize_gradients=True,
+                                       selection_rule="mu",
+                                       bounds=None,
+                                       batch_size=batch_size - 1,
+                                       seed=s) for s in emitter_seeds
         ]
     elif algorithm in ["cma_me_imp"]:
         emitters = [
@@ -227,6 +225,7 @@ def create_optimizer(algorithm, dim, link_lengths, seed):
         ]
 
     return Optimizer(archive, emitters)
+
 
 def save_heatmap(archive, heatmap_path):
     """Saves a heatmap of the archive to the given path.
@@ -267,7 +266,7 @@ def run_experiment(algorithm,
         writer.writerow(['Iteration', 'QD-Score', 'Coverage', 'Maximum', 'Average'])
 
     link_lengths = np.ones(dim)
-    
+
     is_init_pop = algorithm in [
         'og_map_elites', 'og_map_elites_line',
         'og_map_elites_ind', 'og_map_elites_line_ind',
@@ -284,65 +283,65 @@ def run_experiment(algorithm,
 
     best = 0.0
     non_logging_time = 0.0
-    with alive_bar(itrs) as progress:
+    # with alive_bar(itrs) as progress:
 
-        if is_init_pop:
-            # Sample initial population
-            sols = np.array([np.random.normal(size=dim) for _ in range(init_pop)])
+    if is_init_pop:
+        # Sample initial population
+        sols = np.array([np.random.normal(size=dim) for _ in range(init_pop)])
 
-            objs, _, measures, _ = evaluate_grasp(sols, link_lengths)
+        objs, _, measures, _ = evaluate_grasp(sols, link_lengths)
+        best = max(best, max(objs))
+
+        # Add each solution to the archive.
+        for i in range(len(sols)):
+            archive.add(sols[i], objs[i], measures[i])
+
+    for itr in range(1, itrs + 1):
+        itr_start = time.time()
+
+        if is_dqd:
+            sols = optimizer.ask(grad_estimate=True)
+            objs, jacobian_obj, measures, jacobian_measure = evaluate_grasp(sols, link_lengths)
             best = max(best, max(objs))
+            jacobian_obj = np.expand_dims(jacobian_obj, axis=1)
+            jacobian = np.concatenate((jacobian_obj, jacobian_measure), axis=1)
+            optimizer.tell(objs, measures, jacobian=jacobian)
 
-            # Add each solution to the archive.
-            for i in range(len(sols)):
-                archive.add(sols[i], objs[i], measures[i])
+        sols = optimizer.ask()
+        objs, _, measures, _ = evaluate_grasp(sols, link_lengths, calc_jacobians=False)
+        best = max(best, max(objs))
+        optimizer.tell(objs, measures)
+        non_logging_time += time.time() - itr_start
+        # progress()
+        print(f'{itr=}, {itrs=}, Progress: {(100.0 * (itr / itrs)):.2f}%')
 
-        for itr in range(1, itrs + 1):
-            itr_start = time.time()
+        # Save the archive at the given frequency.
+        # Always save on the final iteration.
+        final_itr = itr == itrs
+        if (itr > 0 and itr % log_arch_freq == 0) or final_itr:
+            # Save a full archive for analysis.
+            df = archive.as_pandas(include_solutions=final_itr)
+            df.to_pickle(os.path.join(s_logdir, f"archive_{itr:08d}.pkl"))
 
-            if is_dqd:
-                sols = optimizer.ask(grad_estimate=True)
-                objs, jacobian_obj, measures, jacobian_measure = evaluate_grasp(sols, link_lengths)
-                best = max(best, max(objs))
-                jacobian_obj = np.expand_dims(jacobian_obj, axis=1)
-                jacobian = np.concatenate((jacobian_obj, jacobian_measure), axis=1)
-                optimizer.tell(objs, measures, jacobian=jacobian)
+            # Save a heatmap image to observe how the trial is doing.
+            save_heatmap(archive, os.path.join(s_logdir, f"heatmap_{itr:08d}.png"))
 
-            sols = optimizer.ask()
-            objs, _, measures, _ = evaluate_grasp(sols, link_lengths, calc_jacobians=False)
-            best = max(best, max(objs))
-            optimizer.tell(objs, measures)
-            non_logging_time += time.time() - itr_start
-            progress()
+        # Update the summary statistics for the archive
+        if (itr > 0 and itr % log_freq == 0) or final_itr:
+            with open(summary_filename, 'a') as summary_file:
+                writer = csv.writer(summary_file)
 
-            # Save the archive at the given frequency.
-            # Always save on the final iteration.
-            final_itr = itr == itrs
-            if (itr > 0 and itr % log_arch_freq == 0) or final_itr:
-
-                # Save a full archive for analysis.
-                df = archive.as_pandas(include_solutions = final_itr)
-                df.to_pickle(os.path.join(s_logdir, f"archive_{itr:08d}.pkl"))
-
-                # Save a heatmap image to observe how the trial is doing.
-                save_heatmap(archive, os.path.join(s_logdir, f"heatmap_{itr:08d}.png"))
-
-            # Update the summary statistics for the archive
-            if (itr > 0 and itr % log_freq == 0) or final_itr:
-                with open(summary_filename, 'a') as summary_file:
-                    writer = csv.writer(summary_file)
-
-                    sum_obj = 0
-                    num_filled = 0
-                    num_bins = archive.bins
-                    for sol, obj, beh, idx, meta in zip(*archive.data()):
-                        num_filled += 1
-                        sum_obj += obj
-                    qd_score = sum_obj / num_bins
-                    average = sum_obj / num_filled
-                    coverage = 100.0 * num_filled / num_bins
-                    data = [itr, qd_score, coverage, best, average]
-                    writer.writerow(data)
+                sum_obj = 0
+                num_filled = 0
+                num_bins = archive.bins
+                for sol, obj, beh, idx, meta in zip(*archive.data()):
+                    num_filled += 1
+                    sum_obj += obj
+                qd_score = sum_obj / num_bins
+                average = sum_obj / num_filled
+                coverage = 100.0 * num_filled / num_bins
+                data = [itr, qd_score, coverage, best, average]
+                writer.writerow(data)
 
 
 def arm_main(algorithm,
@@ -385,15 +384,15 @@ def arm_main(algorithm,
     client = Client(cluster)
 
     exp_func = lambda cur_id: run_experiment(
-            algorithm, cur_id,
-            dim=dim,
-            init_pop=init_pop,
-            itrs=itrs,
-            outdir=outdir,
-            log_freq=log_freq,
-            log_arch_freq=log_arch_freq,
-            seed=seed,
-        )
+        algorithm, cur_id,
+        dim=dim,
+        init_pop=init_pop,
+        itrs=itrs,
+        outdir=outdir,
+        log_freq=log_freq,
+        log_arch_freq=log_arch_freq,
+        seed=seed,
+    )
 
     # Run an experiment as a separate process to run all exps in parallel.
     trial_ids = list(range(trials))
