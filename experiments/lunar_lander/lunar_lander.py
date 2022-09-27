@@ -35,8 +35,8 @@ def create_optimizer(algorithm, dim, seed):
     dummy_env = gym.make("QDLunarLanderContinuous-v2")
     action_dim = dummy_env.action_space.shape[0]
     obs_dim = dummy_env.observation_space.shape[0]
-    batch_size = 33
-    num_emitters = 1
+    batch_size = 7
+    num_emitters = 5
 
     initial_sol = np.zeros((action_dim, obs_dim)).reshape(-1)
 
@@ -132,7 +132,7 @@ def run_experiment(algorithm,
         # sample initial population
         sols = np.array([np.random.normal(size=dim) for _ in range(init_pop)])
 
-        objs, _, measures, _ = ppo.train(num_updates=1, traj_len=1000)  # TODO: implement this interface
+        objs, _, measures, _ = ppo.train(num_updates=1, traj_len=ppo.cfg.num_steps)
         best = max(best, max(objs))
 
         # add each solution to the archive
@@ -143,24 +143,37 @@ def run_experiment(algorithm,
         itr_start = time.time()
 
         if is_dqd:
-            # returns a single sol
+            # returns a single sol per emitter
+            objs, obj_grads, measures, measure_grads = [], [], [], []
             sols = optimizer.ask(grad_estimate=True)
-            weights = torch.nn.Parameter(torch.from_numpy(sols[0].astype('float32').reshape(2, 8)))
-            # update the weights of the ppo agent to be the new solution we sampled
-            ppo.agent.actor.weight = weights
-            ppo.agent = ppo.agent.to(device)
-            objs, jacobian_obj, measures, jacobian_measure = \
-                ppo.train(num_updates=1, traj_len=1000)
+            for sol in sols:
+                weights = torch.nn.Parameter(torch.from_numpy(sol.astype('float32').reshape(2, 8)))
+                # update the weights of the ppo agent to be the new solution we sampled
+                ppo.agent.actor.weight = weights
+                ppo.agent = ppo.agent.to(device)
+                obj, jacobian_obj, measure, jacobian_measure = \
+                    ppo.train(num_updates=1, traj_len=ppo.cfg.num_steps)
+
+                objs.append(obj)
+                obj_grads.append(jacobian_obj)
+                measures.append(measure)
+                measure_grads.append(jacobian_measure)
+
+            objs = np.concatenate(objs, axis=0)
+            obj_grads = np.concatenate(obj_grads, axis=0)
+            measures = np.concatenate(measures, axis=0)
+            measure_grads = np.concatenate(measure_grads, axis=0)
+
             best = max(best, max(objs))
-            jacobian_obj = np.expand_dims(jacobian_obj, axis=1)
-            jacobian = np.concatenate((jacobian_obj, jacobian_measure), axis=1)
+            obj_grads = np.expand_dims(obj_grads, axis=1)
+            jacobian = np.concatenate((obj_grads, measure_grads), axis=1)
             optimizer.tell(objs, measures, jacobian=jacobian)
 
         # gets sols around the current solution point by varying coeffs of grad_f and grad_m's
         # i.e. these are nn-agents
         sols = optimizer.ask()
         torch_sols = torch.tensor(sols.astype('float32')).reshape(-1, 8, 2).to(device)
-        objs, measures, = ppo.evaluate_lander(torch_sols, num_steps=1000)
+        objs, measures, = ppo.evaluate_lander_vectorized(torch_sols, num_steps=ppo.cfg.num_steps)
         best = max(best, max(objs))
         optimizer.tell(objs, measures)
         non_logging_time += time.time() - itr_start
@@ -213,6 +226,7 @@ def run_experiment(algorithm,
 
 
 def lander_main(algorithm,
+                ppo,
                 trials=20,
                 dim=1000,
                 init_pop=100,
@@ -266,11 +280,12 @@ if __name__ == '__main__':
     ppo = PPO(seed=0, cfg=cfg)
     if cfg.use_wandb:
         config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name)
-    outdir = './logs/qdppo_1k_global-critic/'
+    outdir = './logs/qdppo_lander_emitters-5_num-steps-250_global-critic/'
     assert not os.path.exists(outdir), "Warning: this dir exists. Danger of overwriting previous run"
     os.mkdir(outdir)
     lander_main(
         algorithm='cma_mega',
+        ppo=ppo,
         trials=1,
         dim=16,
         init_pop=1,
