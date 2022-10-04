@@ -77,7 +77,7 @@ def create_optimizer(algorithm, dim, link_lengths, seed):
     bounds = [(-max_bound, max_bound), (-max_bound, max_bound)]
     initial_sol = np.zeros(dim)
     batch_size = 36
-    num_emitters = 1
+    num_emitters = 3
 
     if algorithm in ["og_map_elites_ind", "og_map_elites_line_ind"]:
         num_emitters = 2

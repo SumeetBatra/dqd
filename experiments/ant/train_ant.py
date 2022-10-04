@@ -16,12 +16,27 @@ from dqd.ribs.optimizers import Optimizer
 from dqd.ribs.visualize import grid_archive_heatmap
 from pathlib import Path
 
-from RL.ppo import PPO, LinearPolicy
+from RL.ppo import PPO
 from RL.train_ppo import parse_args
 from utils.utils import log, config_wandb
+from models.actor_critic import ActorCriticShared
 
 
-def create_optimizer(algorithm, dim, seed, num_emitters):
+def save_heatmap(archive, heatmap_path):
+    """Saves a heatmap of the archive to the given path.
+
+    Args:
+        archive (GridArchive or CVTArchive): The archive to save.
+        heatmap_path: Image path for the heatmap.
+    """
+    plt.figure(figsize=(8, 6))
+    grid_archive_heatmap(archive, vmin=0.0, vmax=100.0)
+    plt.tight_layout()
+    plt.savefig(heatmap_path)
+    plt.close(plt.gcf())
+
+
+def create_optimizer(algorithm, seed, num_emitters):
     """Creates an optimizer based on the algorithm name.
 
     Args:
@@ -31,16 +46,20 @@ def create_optimizer(algorithm, dim, seed, num_emitters):
     Returns:
         Optimizer: A ribs Optimizer for running the algorithm.
     """
-    bounds = [(-1.0, 1.0), (-3.0, 0.0)]  # (-1, 1) for x-pos and (-3, 0) for y-vel.
-    dummy_env = gym.make("QDLunarLanderContinuous-v2")
-    action_dim = dummy_env.action_space.shape[0]
-    obs_dim = dummy_env.observation_space.shape[0]
+    # fraction contact time with ground for each of the 4 legs
+    bounds = [
+        (0., 1.0),
+        (0., 1.0),
+        (0., 1.0),
+        (0., 1.0),
+    ]
+    dummy_env = gym.make('QDAntBulletEnv-v0')
+    action_shape, obs_shape = dummy_env.action_space.shape, dummy_env.observation_space.shape
+    action_dim, obs_dim = np.prod(action_shape), np.prod(obs_shape)
     batch_size = 7
 
-    initial_sol = np.zeros((action_dim, obs_dim)).reshape(-1)
-
-    if algorithm in ["og_map_elites_ind", "og_map_elites_line_ind"]:
-        num_emitters = 2
+    initial_agent = ActorCriticShared(obs_shape, action_shape)
+    initial_sol = initial_agent.serialize()
 
     # Create archive.
     if algorithm in [
@@ -50,8 +69,8 @@ def create_optimizer(algorithm, dim, seed, num_emitters):
         "omg_mega", "cma_mega", "cma_mega_adam",
     ]:
         archive = GridArchive(
-            [50, 50],
-            bounds,
+            dims=[6, 6, 6, 6],
+            ranges=bounds,
             seed=seed
         )
     else:
@@ -77,21 +96,8 @@ def create_optimizer(algorithm, dim, seed, num_emitters):
     return Optimizer(archive, emitters)
 
 
-def save_heatmap(archive, heatmap_path):
-    """Saves a heatmap of the archive to the given path.
-
-    Args:
-        archive (GridArchive or CVTArchive): The archive to save.
-        heatmap_path: Image path for the heatmap.
-    """
-    plt.figure(figsize=(8, 6))
-    grid_archive_heatmap(archive, vmin=0.0, vmax=100.0)
-    plt.tight_layout()
-    plt.savefig(heatmap_path)
-    plt.close(plt.gcf())
-
-
-def run_experiment(algorithm,
+def run_experiment(cfg,
+                   algorithm,
                    ppo,
                    trial_id,
                    dim=1000,
@@ -108,7 +114,7 @@ def run_experiment(algorithm,
     logdir = Path(s_logdir)
     if not logdir.is_dir():
         logdir.mkdir()
-
+        
     # create a new summary file
     summary_filename = os.path.join(s_logdir, f'summary.csv')
     if os.path.exists(summary_filename):
@@ -116,57 +122,31 @@ def run_experiment(algorithm,
     with open(summary_filename, 'w') as summary_file:
         writer = csv.writer(summary_file)
         writer.writerow(['Iteration', 'QD-Score', 'Coverage', 'Maximum', 'Average'])
-
+        
     # cma_mega - specific params
     is_init_pop = False
     is_dqd = True
-
+    
     optimizer = create_optimizer(algorithm, dim, seed, cfg.num_emitters)
     archive = optimizer.archive
-
+    
     best = 0.0
     non_logging_time = 0.0
 
-    if is_init_pop:
-        # sample initial population
-        sols = np.array([np.random.normal(size=dim) for _ in range(init_pop)])
-
-        objs, _, measures, _ = ppo.train(num_updates=1, traj_len=ppo.cfg.num_steps)
-        best = max(best, max(objs))
-
-        # add each solution to the archive
-        for i in range(len(sols)):
-            archive.add(sols[i], objs[i], measures[i])
-
+    obs_shape = ppo.vec_env.single_observation_space.shape
+    action_shape = ppo.vec_env.single_action_space.shape
+    
     for itr in range(1, itrs + 1):
-        itr_start = time.time()
-
-        if is_dqd:
+        itr_start = time.time() 
+        
+        if is_dqd: 
             # returns a single sol per emitter
             objs, obj_grads, measures, measure_grads = [], [], [], []
             sols = optimizer.ask(grad_estimate=True)
+            agent = ActorCriticShared(obs_shape, action_shape).deserialize(sols)
+            ppo.agent = agent
 
-            weights = torch.nn.Parameter(torch.from_numpy(sols.astype('float32').reshape(-1, 2, 8)))
-            ppo.agent.layers[0].weight = weights
-            objs, obj_grads, measures, measure_grads = ppo.train(num_updates=1, traj_len=ppo.cfg.num_steps)
-
-            # for sol in sols:
-            #     weights = torch.nn.Parameter(torch.from_numpy(sol.astype('float32').reshape(2, 8)))
-            #     # update the weights of the ppo agent to be the new solution we sampled
-            #     ppo.agent.actor.weight = weights
-            #     ppo.agent = ppo.agent.to(device)
-            #     obj, jacobian_obj, measure, jacobian_measure = \
-            #         ppo.train(num_updates=1, traj_len=ppo.cfg.num_steps)
-            #
-            #     objs.append(obj)
-            #     obj_grads.append(jacobian_obj)
-            #     measures.append(measure)
-            #     measure_grads.append(jacobian_measure)
-            #
-            # objs = np.concatenate(objs, axis=0)
-            # obj_grads = np.concatenate(obj_grads, axis=0)
-            # measures = np.concatenate(measures, axis=0)
-            # measure_grads = np.concatenate(measure_grads, axis=0)
+            objs, obj_grads, measures, measure_grads = ppo.train(num_updates=1, rollout_length=ppo.cfg.rollout_length)
 
             best = max(best, max(objs))
             obj_grads = np.expand_dims(obj_grads, axis=1)
@@ -176,8 +156,9 @@ def run_experiment(algorithm,
         # gets sols around the current solution point by varying coeffs of grad_f and grad_m's
         # i.e. these are nn-agents
         sols = optimizer.ask()
-        torch_sols = torch.tensor(sols.astype('float32')).reshape(-1, 8, 2).to(device)
-        objs, measures, = ppo.evaluate_lander_vectorized(torch_sols, num_steps=ppo.cfg.num_steps)
+        agents = [ActorCriticShared(obs_shape, action_shape).deserialize(sol) for sol in sols]
+        # objs, measures =  TODO: write this interface
+        objs, measures = None, None
         best = max(best, max(objs))
         optimizer.tell(objs, measures)
         non_logging_time += time.time() - itr_start
@@ -229,17 +210,18 @@ def run_experiment(algorithm,
             })
 
 
-def lander_main(algorithm,
-                ppo,
-                trials=20,
-                dim=1000,
-                init_pop=100,
-                itrs=10000,
-                outdir="logs",
-                log_freq=1,
-                log_arch_freq=1000,
-                seed=None,
-                use_wandb=False):
+def ant_main(cfg,
+             algorithm,
+             ppo,
+             trials=20,
+             dim=1000,
+             init_pop=100,
+             itrs=10000,
+             outdir="logs",
+             log_freq=1,
+             log_arch_freq=1000,
+             seed=None,
+             use_wandb=False):
     """Experimental tool for the planar robotic arm experiments.
 
     Args:
@@ -263,8 +245,8 @@ def lander_main(algorithm,
         logdir.mkdir()
 
     for i in range(trials):
-        # TODO: run_experiment(...)
         run_experiment(
+            cfg,
             algorithm,
             ppo,
             i,
@@ -281,15 +263,15 @@ def lander_main(algorithm,
 
 if __name__ == '__main__':
     cfg = parse_args()
-    # TODO: add this as a separate parse_args()
-    cfg.num_emitters = 5
-    ppo = PPO(seed=0, cfg=cfg)
+    cfg.num_emitters = 1
+    ppo = PPO(seed=cfg.seed, cfg=cfg)
     if cfg.use_wandb:
         config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name)
     outdir = './logs/xyz/'
     assert not os.path.exists(outdir), "Warning: this dir exists. Danger of overwriting previous run"
     os.mkdir(outdir)
-    lander_main(
+
+    ant_main(
         algorithm='cma_mega',
         ppo=ppo,
         trials=1,
