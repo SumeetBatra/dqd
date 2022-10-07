@@ -19,7 +19,8 @@ from pathlib import Path
 from RL.ppo import PPO
 from RL.train_ppo import parse_args
 from utils.utils import log, config_wandb
-from models.actor_critic import ActorCriticShared
+from models.actor_critic import QDActorCriticShared
+from utils.vectorized2 import QDVectorizedActorCriticShared
 
 
 def save_heatmap(archive, heatmap_path):
@@ -36,7 +37,7 @@ def save_heatmap(archive, heatmap_path):
     plt.close(plt.gcf())
 
 
-def create_optimizer(algorithm, seed, num_emitters):
+def create_optimizer(cfg, algorithm, seed, num_emitters):
     """Creates an optimizer based on the algorithm name.
 
     Args:
@@ -58,7 +59,7 @@ def create_optimizer(algorithm, seed, num_emitters):
     action_dim, obs_dim = np.prod(action_shape), np.prod(obs_shape)
     batch_size = 7
 
-    initial_agent = ActorCriticShared(obs_shape, action_shape)
+    initial_agent = QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims)
     initial_sol = initial_agent.serialize()
 
     # Create archive.
@@ -127,7 +128,7 @@ def run_experiment(cfg,
     is_init_pop = False
     is_dqd = True
     
-    optimizer = create_optimizer(algorithm, dim, seed, cfg.num_emitters)
+    optimizer = create_optimizer(cfg, algorithm, seed, cfg.num_emitters)
     archive = optimizer.archive
     
     best = 0.0
@@ -139,13 +140,13 @@ def run_experiment(cfg,
     for itr in range(1, itrs + 1):
         itr_start = time.time() 
         
-        if is_dqd: 
+        if is_dqd:
             # returns a single sol per emitter
-            objs, obj_grads, measures, measure_grads = [], [], [], []
             sols = optimizer.ask(grad_estimate=True)
-            agent = ActorCriticShared(obs_shape, action_shape).deserialize(sols)
-            ppo.agent = agent
-
+            agents = [QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims).deserialize(sol) for sol in sols]
+            vec_agent = QDVectorizedActorCriticShared(cfg, agents, QDActorCriticShared, cfg.num_dims, obs_shape=obs_shape,
+                                                      action_shape=action_shape)
+            ppo.agent = vec_agent
             objs, obj_grads, measures, measure_grads = ppo.train(num_updates=1, rollout_length=ppo.cfg.rollout_length)
 
             best = max(best, max(objs))
@@ -156,9 +157,10 @@ def run_experiment(cfg,
         # gets sols around the current solution point by varying coeffs of grad_f and grad_m's
         # i.e. these are nn-agents
         sols = optimizer.ask()
-        agents = [ActorCriticShared(obs_shape, action_shape).deserialize(sol) for sol in sols]
-        # objs, measures =  TODO: write this interface
-        objs, measures = None, None
+        agents = [QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims).deserialize(sol) for sol in sols]
+        vec_agent = QDVectorizedActorCriticShared(cfg, agents, QDActorCriticShared, obs_shape=obs_shape,
+                                                  action_shape=action_shape, measure_dims=cfg.num_dims)
+        objs, measures = ppo.evaluate(vec_agent, ppo.multi_eval_env)
         best = max(best, max(objs))
         optimizer.tell(objs, measures)
         non_logging_time += time.time() - itr_start
@@ -267,15 +269,21 @@ if __name__ == '__main__':
     ppo = PPO(seed=cfg.seed, cfg=cfg)
     if cfg.use_wandb:
         config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name)
-    outdir = './logs/xyz/'
+    outdir = './logs/qdppo_ant_v0/'
     assert not os.path.exists(outdir), "Warning: this dir exists. Danger of overwriting previous run"
     os.mkdir(outdir)
 
+    obs_shape = ppo.vec_env.single_observation_space.shape
+    action_shape = ppo.vec_env.single_action_space.shape
+    dummy_agent_params = QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims).serialize()
+    dims = len(dummy_agent_params)
+
     ant_main(
+        cfg,
         algorithm='cma_mega',
         ppo=ppo,
         trials=1,
-        dim=16,
+        dim=dims,
         init_pop=1,
         itrs=1000,
         outdir=outdir,
