@@ -9,9 +9,8 @@ import wandb
 import numpy as np
 import matplotlib.pyplot as plt
 
-import RL.ppo
 from dqd.ribs.archives import GridArchive
-from dqd.ribs.emitters import ImprovementEmitter, GradientImprovementEmitter
+from dqd.ribs.emitters import GradientImprovementEmitter, GradientEmitter
 from dqd.ribs.optimizers import Optimizer
 from dqd.ribs.visualize import grid_archive_heatmap
 from pathlib import Path
@@ -20,7 +19,7 @@ from RL.ppo import PPO
 from RL.train_ppo import parse_args
 from utils.utils import log, config_wandb
 from models.actor_critic import QDActorCriticShared
-from utils.vectorized2 import QDVectorizedActorCriticShared
+from models.vectorized import QDVectorizedActorCriticShared
 
 
 def save_heatmap(archive, heatmap_path):
@@ -57,7 +56,7 @@ def create_optimizer(cfg, algorithm, seed, num_emitters):
     dummy_env = gym.make('QDAntBulletEnv-v0')
     action_shape, obs_shape = dummy_env.action_space.shape, dummy_env.observation_space.shape
     action_dim, obs_dim = np.prod(action_shape), np.prod(obs_shape)
-    batch_size = 7
+    batch_size = cfg.mega_lambda
 
     initial_agent = QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims)
     initial_sol = initial_agent.serialize()
@@ -82,18 +81,31 @@ def create_optimizer(cfg, algorithm, seed, num_emitters):
     emitter_seeds = [None] * num_emitters if seed is None else list(
         range(seed, seed + num_emitters))
     # emitters for cma-mega
-    emitters = [
-        GradientImprovementEmitter(archive,
-                                   initial_sol,
-                                   sigma_g=0.05,
-                                   stepsize=1.0,
-                                   gradient_optimizer="gradient_ascent",
-                                   normalize_gradients=True,
-                                   selection_rule="mu",
-                                   bounds=None,
-                                   batch_size=batch_size - 1,
-                                   seed=s) for s in emitter_seeds
-    ]
+    if algorithm in ['cma_mega']:
+        emitters = [
+            GradientImprovementEmitter(archive,
+                                       initial_sol,
+                                       sigma_g=0.05,
+                                       stepsize=0.01,
+                                       gradient_optimizer="adam",
+                                       normalize_gradients=True,
+                                       selection_rule="mu",
+                                       restart_rule='basic',
+                                       bounds=None,
+                                       batch_size=batch_size,
+                                       seed=s) for s in emitter_seeds
+        ]
+    elif algorithm in ['omg_mega']:
+        emitters = [
+            GradientEmitter(archive,
+                            initial_sol,
+                            sigma_g=0.05,
+                            normalize_gradients=True,
+                            bounds=None,
+                            batch_size=batch_size,
+                            seed=s) for s in emitter_seeds
+        ]
+
     return Optimizer(archive, emitters)
 
 
@@ -146,8 +158,10 @@ def run_experiment(cfg,
             agents = [QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims).deserialize(sol) for sol in sols]
             vec_agent = QDVectorizedActorCriticShared(cfg, agents, QDActorCriticShared, cfg.num_dims, obs_shape=obs_shape,
                                                       action_shape=action_shape)
-            ppo.agent = vec_agent
-            objs, obj_grads, measures, measure_grads = ppo.train(num_updates=1, rollout_length=ppo.cfg.rollout_length)
+            ppo.vec_inference = vec_agent
+            objs, obj_grads, measures, measure_grads = ppo.train(num_updates=10, rollout_length=ppo.cfg.rollout_length)
+            # sols[0] = ppo._agent.serialize()
+            # optimizer.emitters[0]._gradient_opt.theta = sols[0]
 
             best = max(best, max(objs))
             obj_grads = np.expand_dims(obj_grads, axis=1)
