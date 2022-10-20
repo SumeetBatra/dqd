@@ -56,7 +56,7 @@ def create_optimizer(cfg, algorithm, seed, num_emitters):
         (0., 1.0),
         (0., 1.0),
     ]
-    obs_shape, action_shape = (28,), (8,)  # TODO: fix this
+    obs_shape, action_shape = cfg.obs_shape, cfg.action_shape
     action_dim, obs_dim = np.prod(action_shape), np.prod(obs_shape)
     batch_size = cfg.mega_lambda
 
@@ -88,7 +88,7 @@ def create_optimizer(cfg, algorithm, seed, num_emitters):
             GradientImprovementEmitter(archive,
                                        initial_sol,
                                        sigma_g=0.05,
-                                       stepsize=0.001,
+                                       stepsize=cfg.dqd_lr,
                                        gradient_optimizer="adam",
                                        normalize_gradients=True,
                                        selection_rule="mu",
@@ -319,9 +319,9 @@ if __name__ == '__main__':
     assert not os.path.exists(outdir), "Warning: this dir exists. Danger of overwriting previous run"
     os.mkdir(outdir)
 
-    obs_shape = ppo.vec_env.single_observation_space.shape
-    action_shape = ppo.vec_env.single_action_space.shape
-    dummy_agent_params = Actor(cfg, obs_shape, action_shape).serialize()
+    cfg.obs_shape = ppo.vec_env.single_observation_space.shape
+    cfg.action_shape = ppo.vec_env.single_action_space.shape
+    dummy_agent_params = Actor(cfg, cfg.obs_shape, cfg.action_shape).serialize()
     dims = len(dummy_agent_params)
 
     ant_main(
