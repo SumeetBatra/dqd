@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from decorator import decorator
 
-from ribs.archives._add_status import AddStatus
+from dqd.ribs.archives._add_status import AddStatus
 
 
 @decorator

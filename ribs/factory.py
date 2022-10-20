@@ -13,15 +13,15 @@ import pathlib
 
 import toml
 
-from ribs.archives._cvt_archive import CVTArchive
-from ribs.archives._grid_archive import GridArchive
-from ribs.archives._sliding_boundaries_archive import SlidingBoundariesArchive
-from ribs.emitters._gaussian_emitter import GaussianEmitter
-from ribs.emitters._improvement_emitter import ImprovementEmitter
-from ribs.emitters._iso_line_emitter import IsoLineEmitter
-from ribs.emitters._optimizing_emitter import OptimizingEmitter
-from ribs.emitters._random_direction_emitter import RandomDirectionEmitter
-from ribs.optimizers._optimizer import Optimizer
+from dqd.ribs.archives._cvt_archive import CVTArchive
+from dqd.ribs.archives._grid_archive import GridArchive
+from dqd.ribs.archives._sliding_boundaries_archive import SlidingBoundariesArchive
+from dqd.ribs.emitters._gaussian_emitter import GaussianEmitter
+from dqd.ribs.emitters._improvement_emitter import ImprovementEmitter
+from dqd.ribs.emitters._iso_line_emitter import IsoLineEmitter
+from dqd.ribs.emitters._optimizing_emitter import OptimizingEmitter
+from dqd.ribs.emitters._random_direction_emitter import RandomDirectionEmitter
+from dqd.ribs.optimizers._optimizer import Optimizer
 
 __all__ = [
     "from_config",

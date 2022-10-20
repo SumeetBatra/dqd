@@ -3,7 +3,7 @@ import itertools
 import numpy as np
 from numba import jit
 
-from ribs.emitters._emitter_base import EmitterBase
+from dqd.ribs.emitters._emitter_base import EmitterBase
 
 
 class GradientEmitter(EmitterBase):

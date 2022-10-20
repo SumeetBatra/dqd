@@ -18,8 +18,11 @@ from pathlib import Path
 from RL.ppo import PPO
 from RL.train_ppo import parse_args
 from utils.utils import log, config_wandb
-from models.actor_critic import QDActorCriticShared
-from models.vectorized import QDVectorizedActorCriticShared
+from models.actor_critic import Actor
+from models.vectorized import VectorizedActor
+from envs.cpu.vec_env import make_vec_env
+from envs.brax_custom.gpu_env import make_vec_env_brax
+from utils.normalize_obs import NormalizeReward, NormalizeObservation
 
 
 def save_heatmap(archive, heatmap_path):
@@ -53,12 +56,11 @@ def create_optimizer(cfg, algorithm, seed, num_emitters):
         (0., 1.0),
         (0., 1.0),
     ]
-    dummy_env = gym.make('QDAntBulletEnv-v0')
-    action_shape, obs_shape = dummy_env.action_space.shape, dummy_env.observation_space.shape
+    obs_shape, action_shape = (28,), (8,)  # TODO: fix this
     action_dim, obs_dim = np.prod(action_shape), np.prod(obs_shape)
     batch_size = cfg.mega_lambda
 
-    initial_agent = QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims)
+    initial_agent = Actor(cfg, obs_shape, action_shape)
     initial_sol = initial_agent.serialize()
 
     # Create archive.
@@ -86,7 +88,7 @@ def create_optimizer(cfg, algorithm, seed, num_emitters):
             GradientImprovementEmitter(archive,
                                        initial_sol,
                                        sigma_g=0.05,
-                                       stepsize=0.01,
+                                       stepsize=0.001,
                                        gradient_optimizer="adam",
                                        normalize_gradients=True,
                                        selection_rule="mu",
@@ -127,7 +129,7 @@ def run_experiment(cfg,
     logdir = Path(s_logdir)
     if not logdir.is_dir():
         logdir.mkdir()
-        
+
     # create a new summary file
     summary_filename = os.path.join(s_logdir, f'summary.csv')
     if os.path.exists(summary_filename):
@@ -135,33 +137,43 @@ def run_experiment(cfg,
     with open(summary_filename, 'w') as summary_file:
         writer = csv.writer(summary_file)
         writer.writerow(['Iteration', 'QD-Score', 'Coverage', 'Maximum', 'Average'])
-        
+
     # cma_mega - specific params
     is_init_pop = False
     is_dqd = True
-    
+
     optimizer = create_optimizer(cfg, algorithm, seed, cfg.num_emitters)
     archive = optimizer.archive
-    
+
     best = 0.0
     non_logging_time = 0.0
 
     obs_shape = ppo.vec_env.single_observation_space.shape
     action_shape = ppo.vec_env.single_action_space.shape
-    
+
+    reward_normalizer = None
+
     for itr in range(1, itrs + 1):
-        itr_start = time.time() 
-        
+        itr_start = time.time()
+
         if is_dqd:
             # returns a single sol per emitter
             sols = optimizer.ask(grad_estimate=True)
-            agents = [QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims).deserialize(sol) for sol in sols]
-            vec_agent = QDVectorizedActorCriticShared(cfg, agents, QDActorCriticShared, cfg.num_dims, obs_shape=obs_shape,
-                                                      action_shape=action_shape)
+            agents = [Actor(cfg, obs_shape, action_shape).deserialize(sol).to(device) for sol
+                      in sols]
+
+            if reward_normalizer is None:
+                reward_normalizer = agents[0].reward_normalizer
+            else:
+                agents[0].reward_normalizer = reward_normalizer
+
+            vec_agent = VectorizedActor(cfg, agents, Actor, obs_shape=obs_shape,
+                                        action_shape=action_shape).to(device)
+            ppo.agents = agents
             ppo.vec_inference = vec_agent
             objs, obj_grads, measures, measure_grads = ppo.train(num_updates=10, rollout_length=ppo.cfg.rollout_length)
-            # sols[0] = ppo._agent.serialize()
-            # optimizer.emitters[0]._gradient_opt.theta = sols[0]
+
+            reward_normalizer = agents[0].reward_normalizer
 
             best = max(best, max(objs))
             obj_grads = np.expand_dims(obj_grads, axis=1)
@@ -171,9 +183,11 @@ def run_experiment(cfg,
         # gets sols around the current solution point by varying coeffs of grad_f and grad_m's
         # i.e. these are nn-agents
         sols = optimizer.ask()
-        agents = [QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims).deserialize(sol) for sol in sols]
-        vec_agent = QDVectorizedActorCriticShared(cfg, agents, QDActorCriticShared, obs_shape=obs_shape,
-                                                  action_shape=action_shape, measure_dims=cfg.num_dims)
+        agents = [Actor(cfg, obs_shape, action_shape).deserialize(sol).to(device) for sol in
+                  sols]
+
+        vec_agent = VectorizedActor(cfg, agents, Actor, obs_shape=obs_shape,
+                                    action_shape=action_shape, measure_dims=cfg.num_dims).to(device)
         objs, measures = ppo.evaluate(vec_agent, ppo.multi_eval_env)
         best = max(best, max(objs))
         optimizer.tell(objs, measures)
@@ -280,16 +294,34 @@ def ant_main(cfg,
 if __name__ == '__main__':
     cfg = parse_args()
     cfg.num_emitters = 1
-    ppo = PPO(seed=cfg.seed, cfg=cfg)
+
+    if cfg.env_type == 'cpu':
+        vec_env = make_vec_env(cfg)
+        cfg.batch_size = int(cfg.num_workers * cfg.envs_per_worker * cfg.rollout_length)
+        cfg.num_envs = int(cfg.num_workers * cfg.envs_per_worker)
+        cfg.envs_per_model = cfg.num_envs // cfg.num_emitters
+    elif cfg.env_type == 'brax':
+        vec_env = make_vec_env_brax(cfg)
+        cfg.batch_size = int(cfg.env_batch_size * cfg.rollout_length)
+        cfg.num_envs = int(cfg.env_batch_size)
+        cfg.envs_per_model = cfg.num_envs // cfg.num_emitters
+    else:
+        raise NotImplementedError(f'{cfg.env_type} is undefined for "env_type"')
+
+    cfg.minibatch_size = int(cfg.batch_size // cfg.num_minibatches)
+    cfg.obs_shape = vec_env.single_observation_space.shape
+    cfg.action_dim = vec_env.single_action_space.shape
+
+    ppo = PPO(seed=cfg.seed, cfg=cfg, vec_env=vec_env)
     if cfg.use_wandb:
         config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name)
-    outdir = './logs/qdppo_ant_v0/'
+    outdir = './logs/xyz/'
     assert not os.path.exists(outdir), "Warning: this dir exists. Danger of overwriting previous run"
     os.mkdir(outdir)
 
     obs_shape = ppo.vec_env.single_observation_space.shape
     action_shape = ppo.vec_env.single_action_space.shape
-    dummy_agent_params = QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims).serialize()
+    dummy_agent_params = Actor(cfg, obs_shape, action_shape).serialize()
     dims = len(dummy_agent_params)
 
     ant_main(

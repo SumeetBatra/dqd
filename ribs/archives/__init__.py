@@ -13,11 +13,11 @@
     ribs.archives.ArchiveBase
     ribs.archives.AddStatus
 """
-from ribs.archives._add_status import AddStatus
-from ribs.archives._archive_base import ArchiveBase
-from ribs.archives._cvt_archive import CVTArchive
-from ribs.archives._grid_archive import GridArchive
-from ribs.archives._sliding_boundaries_archive import SlidingBoundariesArchive
+from dqd.ribs.archives._add_status import AddStatus
+from dqd.ribs.archives._archive_base import ArchiveBase
+from dqd.ribs.archives._cvt_archive import CVTArchive
+from dqd.ribs.archives._grid_archive import GridArchive
+from dqd.ribs.archives._sliding_boundaries_archive import SlidingBoundariesArchive
 
 __all__ = [
     "GridArchive",

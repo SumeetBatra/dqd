@@ -2,7 +2,7 @@
 import numpy as np
 from numba import jit
 
-from ribs.archives._archive_base import ArchiveBase
+from dqd.ribs.archives._archive_base import ArchiveBase
 
 _EPSILON = 1e-6
 

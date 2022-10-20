@@ -18,14 +18,14 @@
     ribs.emitters.OptimizingEmitter
     ribs.emitters.EmitterBase
 """
-from ribs.emitters._emitter_base import EmitterBase
-from ribs.emitters._gaussian_emitter import GaussianEmitter
-from ribs.emitters._gradient_emitter import GradientEmitter
-from ribs.emitters._gradient_improvement_emitter import GradientImprovementEmitter
-from ribs.emitters._improvement_emitter import ImprovementEmitter
-from ribs.emitters._iso_line_emitter import IsoLineEmitter
-from ribs.emitters._optimizing_emitter import OptimizingEmitter
-from ribs.emitters._random_direction_emitter import RandomDirectionEmitter
+from dqd.ribs.emitters._emitter_base import EmitterBase
+from dqd.ribs.emitters._gaussian_emitter import GaussianEmitter
+from dqd.ribs.emitters._gradient_emitter import GradientEmitter
+from dqd.ribs.emitters._gradient_improvement_emitter import GradientImprovementEmitter
+from dqd.ribs.emitters._improvement_emitter import ImprovementEmitter
+from dqd.ribs.emitters._iso_line_emitter import IsoLineEmitter
+from dqd.ribs.emitters._optimizing_emitter import OptimizingEmitter
+from dqd.ribs.emitters._random_direction_emitter import RandomDirectionEmitter
 
 __all__ = [
     "GaussianEmitter",

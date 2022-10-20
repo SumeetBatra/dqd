@@ -3,10 +3,10 @@ import itertools
 
 import numpy as np
 
-from ribs.archives import AddStatus
-from ribs.emitters._emitter_base import EmitterBase
-from ribs.emitters.opt import CMAEvolutionStrategy
-from ribs.emitters.opt import AdamOpt, GradientAscentOpt
+from dqd.ribs.archives import AddStatus
+from dqd.ribs.emitters._emitter_base import EmitterBase
+from dqd.ribs.emitters.opt import CMAEvolutionStrategy
+from dqd.ribs.emitters.opt import AdamOpt, GradientAscentOpt
 
 class GradientImprovementEmitter(EmitterBase):
     """Adapts a covariance matrix in behavior space towards changes in the archive.

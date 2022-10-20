@@ -3,9 +3,9 @@ import itertools
 
 import numpy as np
 
-from ribs.archives import AddStatus
-from ribs.emitters._emitter_base import EmitterBase
-from ribs.emitters.opt import CMAEvolutionStrategy
+from dqd.ribs.archives import AddStatus
+from dqd.ribs.emitters._emitter_base import EmitterBase
+from dqd.ribs.emitters.opt import CMAEvolutionStrategy
 
 
 class ImprovementEmitter(EmitterBase):

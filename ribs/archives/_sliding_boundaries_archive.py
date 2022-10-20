@@ -6,7 +6,7 @@ import numba as nb
 import numpy as np
 from sortedcontainers import SortedList
 
-from ribs.archives._archive_base import ArchiveBase, require_init
+from dqd.ribs.archives._archive_base import ArchiveBase, require_init
 
 _EPSILON = 1e-6
 

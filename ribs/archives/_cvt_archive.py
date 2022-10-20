@@ -4,7 +4,7 @@ from numba import jit
 from scipy.spatial import cKDTree  # pylint: disable=no-name-in-module
 from sklearn.cluster import k_means
 
-from ribs.archives._archive_base import ArchiveBase, require_init
+from dqd.ribs.archives._archive_base import ArchiveBase, require_init
 
 
 class CVTArchive(ArchiveBase):
