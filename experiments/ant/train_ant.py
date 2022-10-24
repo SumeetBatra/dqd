@@ -41,7 +41,7 @@ def save_heatmap(archive, heatmap_path):
     plt.close(plt.gcf())
 
 
-def load_optmizer_from_checkpoint(optim_path):
+def load_optimizer_from_checkpoint(optim_path):
     assert os.path.exists(optim_path), f'Error! {optim_path=} does not exist'
     with open(optim_path, 'rb') as f:
         optim = pickle.load(optim_path)
@@ -156,7 +156,7 @@ def run_experiment(cfg,
     is_dqd = True
 
     if cfg.load_optim_from_cp:
-        optimizer = load_optmizer_from_checkpoint(cfg.load_optim_from_cp)
+        optimizer = load_optimizer_from_checkpoint(cfg.load_optim_from_cp)
     else:
         optimizer = create_optimizer(cfg, algorithm, seed, cfg.num_emitters)
     archive = optimizer.archive
@@ -229,7 +229,7 @@ def run_experiment(cfg,
                 pickle.dump(optimizer, f)
 
             # save the top 3 checkpoints, delete older ones
-            while len(get_checkpoints(str(cp_dir))) > 2:
+            while len(get_checkpoints(str(cp_dir))) > 3:
                 oldest_checkpoint = get_checkpoints(str(cp_dir))[0]
                 if os.path.exists(oldest_checkpoint):
                     log.info(f'Removing checkpoint {oldest_checkpoint}')
