@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 import time
 
@@ -40,15 +41,11 @@ def save_heatmap(archive, heatmap_path):
     plt.close(plt.gcf())
 
 
-def load_archive_from_checkpoint(archive_path, current_archive: GridArchive):
-    assert os.path.exists(archive_path), f'Error! {archive_path=} does not exist'
-    with open(archive_path, 'rb') as f:
-        archive_df = pickle.load(f)
-    for idx, soln in archive_df.iterrows():
-        behavior_values = np.array(soln[4:8])
-        obj_value = soln[8]
-        agent_params = soln[9:]
-        current_archive.add(agent_params, obj_value, behavior_values)
+def load_optmizer_from_checkpoint(optim_path):
+    assert os.path.exists(optim_path), f'Error! {optim_path=} does not exist'
+    with open(optim_path, 'rb') as f:
+        optim = pickle.load(optim_path)
+    return optim
 
 
 def create_optimizer(cfg, algorithm, seed, num_emitters):
@@ -119,12 +116,7 @@ def create_optimizer(cfg, algorithm, seed, num_emitters):
                             batch_size=batch_size,
                             seed=s) for s in emitter_seeds
         ]
-    optim = Optimizer(archive, emitters)
-    if cfg.load_arch_from_cp:
-        log.info("Loading archive from existing checkpoint!")
-        load_archive_from_checkpoint(cfg.load_arch_from_cp, optim.archive)
-        log.info("Succesfully loaded archive from checkpoint")
-    return optim
+    return Optimizer(archive, emitters)
 
 
 def run_experiment(cfg,
@@ -163,7 +155,10 @@ def run_experiment(cfg,
     is_init_pop = False
     is_dqd = True
 
-    optimizer = create_optimizer(cfg, algorithm, seed, cfg.num_emitters)
+    if cfg.load_optim_from_cp:
+        optimizer = load_optmizer_from_checkpoint(cfg.load_optim_from_cp)
+    else:
+        optimizer = create_optimizer(cfg, algorithm, seed, cfg.num_emitters)
     archive = optimizer.archive
 
     best = 0.0
@@ -223,16 +218,22 @@ def run_experiment(cfg,
         # Always save on the final iteration.
         final_itr = itr == itrs
         if (itr > 0 and itr % log_arch_freq == 0) or final_itr:
+            final_cp_dir = os.path.join(cp_dir, f'cp_{itr:08d}')
+            if not os.path.exists(final_cp_dir):
+                os.mkdir(final_cp_dir)
             # Save a full archive for analysis.
             df = archive.as_pandas(include_solutions=True)
-            df.to_pickle(os.path.join(cp_dir, f"archive_{itr:08d}.pkl"))
+            df.to_pickle(os.path.join(final_cp_dir, f"archive_{itr:08d}.pkl"))
+            # save the optimizer for checkpointing
+            with open(os.path.join(final_cp_dir, f'optim_{itr:08d}.pkl'), 'wb') as f:
+                pickle.dump(optimizer, f)
 
             # save the top 3 checkpoints, delete older ones
-            while len(get_checkpoints(str(cp_dir))) > 3:
+            while len(get_checkpoints(str(cp_dir))) > 2:
                 oldest_checkpoint = get_checkpoints(str(cp_dir))[0]
                 if os.path.exists(oldest_checkpoint):
                     log.info(f'Removing checkpoint {oldest_checkpoint}')
-                    os.remove(oldest_checkpoint)
+                    shutil.rmtree(oldest_checkpoint)
 
             # Save a heatmap image to observe how the trial is doing.
             # save_heatmap(archive, os.path.join(s_logdir, f"heatmap_{itr:08d}.png"))
