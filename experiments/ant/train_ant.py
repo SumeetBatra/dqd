@@ -8,6 +8,7 @@ import torch
 import wandb
 import numpy as np
 import matplotlib.pyplot as plt
+import pickle
 
 from dqd.ribs.archives import GridArchive
 from dqd.ribs.emitters import GradientImprovementEmitter, GradientEmitter
@@ -17,7 +18,7 @@ from pathlib import Path
 
 from RL.ppo import PPO
 from RL.train_ppo import parse_args
-from utils.utils import log, config_wandb
+from utils.utils import log, config_wandb, get_checkpoints
 from models.actor_critic import Actor
 from models.vectorized import VectorizedActor
 from envs.cpu.vec_env import make_vec_env
@@ -37,6 +38,17 @@ def save_heatmap(archive, heatmap_path):
     plt.tight_layout()
     plt.savefig(heatmap_path)
     plt.close(plt.gcf())
+
+
+def load_archive_from_checkpoint(archive_path, current_archive: GridArchive):
+    assert os.path.exists(archive_path), f'Error! {archive_path=} does not exist'
+    with open(archive_path, 'rb') as f:
+        archive_df = pickle.load(f)
+    for idx, soln in archive_df.iterrows():
+        behavior_values = np.array(soln[4:8])
+        obj_value = soln[8]
+        agent_params = soln[9:]
+        current_archive.add(agent_params, obj_value, behavior_values)
 
 
 def create_optimizer(cfg, algorithm, seed, num_emitters):
@@ -107,8 +119,12 @@ def create_optimizer(cfg, algorithm, seed, num_emitters):
                             batch_size=batch_size,
                             seed=s) for s in emitter_seeds
         ]
-
-    return Optimizer(archive, emitters)
+    optim = Optimizer(archive, emitters)
+    if cfg.load_arch_from_cp:
+        log.info("Loading archive from existing checkpoint!")
+        load_archive_from_checkpoint(cfg.load_arch_from_cp, optim.archive)
+        log.info("Succesfully loaded archive from checkpoint")
+    return optim
 
 
 def run_experiment(cfg,
@@ -129,6 +145,11 @@ def run_experiment(cfg,
     logdir = Path(s_logdir)
     if not logdir.is_dir():
         logdir.mkdir()
+
+    cp_dir = os.path.join(logdir, 'checkpoints')
+    cp_dir = Path(cp_dir)
+    if not cp_dir.is_dir():
+        cp_dir.mkdir()
 
     # create a new summary file
     summary_filename = os.path.join(s_logdir, f'summary.csv')
@@ -173,11 +194,10 @@ def run_experiment(cfg,
             ppo.agents = agents
             ppo.vec_inference = vec_agent
             objs, obj_grads, measures = ppo.train(num_updates=10, rollout_length=ppo.cfg.rollout_length)
-            ppo._agents[0].deserialize(sols[0])  # need to set this again b/c train() will update the previously stored agents
-
             if cfg.normalize_rewards:
                 # store the updated reward normalizer
                 reward_normalizer = agents[0].reward_normalizer
+            ppo._agents[0].deserialize(sols[0])  # need to set this again b/c train() will update the previously stored agents
 
             measure_grads = ppo.get_measure_grads(num_updates=10, rollout_length=ppo.cfg.rollout_length)
             best = max(best, max(objs))
@@ -204,8 +224,15 @@ def run_experiment(cfg,
         final_itr = itr == itrs
         if (itr > 0 and itr % log_arch_freq == 0) or final_itr:
             # Save a full archive for analysis.
-            df = archive.as_pandas(include_solutions=final_itr)
-            df.to_pickle(os.path.join(s_logdir, f"archive_{itr:08d}.pkl"))
+            df = archive.as_pandas(include_solutions=True)
+            df.to_pickle(os.path.join(cp_dir, f"archive_{itr:08d}.pkl"))
+
+            # save the top 3 checkpoints, delete older ones
+            while len(get_checkpoints(str(cp_dir))) > 3:
+                oldest_checkpoint = get_checkpoints(str(cp_dir))[0]
+                if os.path.exists(oldest_checkpoint):
+                    log.info(f'Removing checkpoint {oldest_checkpoint}')
+                    os.remove(oldest_checkpoint)
 
             # Save a heatmap image to observe how the trial is doing.
             # save_heatmap(archive, os.path.join(s_logdir, f"heatmap_{itr:08d}.png"))
@@ -255,7 +282,7 @@ def ant_main(cfg,
              itrs=10000,
              outdir="logs",
              log_freq=1,
-             log_arch_freq=1000,
+             log_arch_freq=10,
              seed=None,
              use_wandb=False):
     """Experimental tool for the planar robotic arm experiments.
@@ -274,6 +301,7 @@ def ant_main(cfg,
     # Create a shared logging directory for the experiments for this algorithm.
     s_logdir = os.path.join(outdir, f"{algorithm}")
     logdir = Path(s_logdir)
+    cfg.logdir = logdir
     outdir = Path(outdir)
     if not outdir.is_dir():
         outdir.mkdir()
@@ -322,6 +350,7 @@ if __name__ == '__main__':
     if cfg.use_wandb:
         config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name, wandb_group=cfg.wandb_group)
     outdir = './logs/xyz/'
+    cfg.outdir = outdir
     assert not os.path.exists(outdir), "Warning: this dir exists. Danger of overwriting previous run"
     os.mkdir(outdir)
 
@@ -339,6 +368,7 @@ if __name__ == '__main__':
         init_pop=1,
         itrs=250,
         outdir=outdir,
+        log_arch_freq=cfg.log_arch_freq,
         seed=0,
         use_wandb=cfg.use_wandb
     )
