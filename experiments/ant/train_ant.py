@@ -162,19 +162,24 @@ def run_experiment(cfg,
             agents = [Actor(cfg, obs_shape, action_shape).deserialize(sol).to(device) for sol
                       in sols]
 
-            if reward_normalizer is None:
-                reward_normalizer = agents[0].reward_normalizer
-            else:
-                agents[0].reward_normalizer = reward_normalizer
+            if cfg.normalize_rewards:
+                if reward_normalizer is None:
+                    reward_normalizer = agents[0].reward_normalizer
+                else:
+                    agents[0].reward_normalizer = reward_normalizer
 
             vec_agent = VectorizedActor(cfg, agents, Actor, obs_shape=obs_shape,
                                         action_shape=action_shape).to(device)
             ppo.agents = agents
             ppo.vec_inference = vec_agent
-            objs, obj_grads, measures, measure_grads = ppo.train(num_updates=10, rollout_length=ppo.cfg.rollout_length)
+            objs, obj_grads, measures = ppo.train(num_updates=10, rollout_length=ppo.cfg.rollout_length)
+            ppo._agents[0].deserialize(sols[0])  # need to set this again b/c train() will update the previously stored agents
 
-            reward_normalizer = agents[0].reward_normalizer
+            if cfg.normalize_rewards:
+                # store the updated reward normalizer
+                reward_normalizer = agents[0].reward_normalizer
 
+            measure_grads = ppo.get_measure_grads(num_updates=10, rollout_length=ppo.cfg.rollout_length)
             best = max(best, max(objs))
             obj_grads = np.expand_dims(obj_grads, axis=1)
             jacobian = np.concatenate((obj_grads, measure_grads), axis=1)
@@ -203,7 +208,7 @@ def run_experiment(cfg,
             df.to_pickle(os.path.join(s_logdir, f"archive_{itr:08d}.pkl"))
 
             # Save a heatmap image to observe how the trial is doing.
-            save_heatmap(archive, os.path.join(s_logdir, f"heatmap_{itr:08d}.png"))
+            # save_heatmap(archive, os.path.join(s_logdir, f"heatmap_{itr:08d}.png"))
 
             # Update the summary statistics for the archive
             if (itr > 0 and itr % log_freq == 0) or final_itr:
@@ -237,6 +242,7 @@ def run_experiment(cfg,
                 "QD/average performance": average,
                 "QD/coverage (%)": coverage,
                 "QD/best score": best,
+                "QD/iteration": itr
             })
 
 
@@ -314,7 +320,7 @@ if __name__ == '__main__':
 
     ppo = PPO(seed=cfg.seed, cfg=cfg, vec_env=vec_env)
     if cfg.use_wandb:
-        config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name)
+        config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name, wandb_group=cfg.wandb_group)
     outdir = './logs/xyz/'
     assert not os.path.exists(outdir), "Warning: this dir exists. Danger of overwriting previous run"
     os.mkdir(outdir)
@@ -331,7 +337,7 @@ if __name__ == '__main__':
         trials=1,
         dim=dims,
         init_pop=1,
-        itrs=1000,
+        itrs=250,
         outdir=outdir,
         seed=0,
         use_wandb=cfg.use_wandb
