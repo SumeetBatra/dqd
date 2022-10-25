@@ -44,7 +44,7 @@ def save_heatmap(archive, heatmap_path):
 def load_optimizer_from_checkpoint(optim_path):
     assert os.path.exists(optim_path), f'Error! {optim_path=} does not exist'
     with open(optim_path, 'rb') as f:
-        optim = pickle.load(optim_path)
+        optim = pickle.load(f)
     return optim
 
 
@@ -350,7 +350,7 @@ if __name__ == '__main__':
     ppo = PPO(seed=cfg.seed, cfg=cfg, vec_env=vec_env)
     if cfg.use_wandb:
         config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name, wandb_group=cfg.wandb_group)
-    outdir = './logs/xyz/'
+    outdir = './logs/qd-ppo-ant/'
     cfg.outdir = outdir
     assert not os.path.exists(outdir), "Warning: this dir exists. Danger of overwriting previous run"
     os.mkdir(outdir)
